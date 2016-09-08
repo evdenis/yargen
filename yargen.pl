@@ -42,40 +42,6 @@ my $mmodule = 'Perl' . $module =~ s/:++//gr  . 'Module';
 my $hmodule = $module =~ s/::/-/gr;
 my $ccve = uc($cve =~ tr/-/_/r);
 
-my $dump = $module . '.dump';
-my @modules;
-
-if (-f $dump) {
-   @modules = @{retrieve($dump)};
-}
-
-unless (@modules) {
-   my $ua = Mojo::UserAgent->new();
-   my $r = $ua->get('https://metacpan.org/pod/' . $module);
-   if ($r->success && $r->res->code() == 200) {
-      my $cl = $r->res->dom
-                      ->find('div.release.status-latest.maturity-released select option')
-                      ->map(attr => 'value')
-                      ->compact()
-                      ->map(sub{s!^/module!https://api.metacpan.org/source!r})
-                      ->sort()
-                      ->uniq();
-      @modules = $cl->map(sub {
-            my $r = $ua->get($_);
-            if ($r->success && $r->res->code() == 200) {
-               $r->res->body
-            } else {
-               warn "Can't get module $_\n";
-               undef
-            }
-         }
-      )->compact()->each();
-      store \@modules, $dump;
-   } else {
-      warn "Module not found on metacpan\n";
-   }
-}
-
 sub trim {
    $_[0] =~ s/(^\s++)|(\s++$)//gr
 }
@@ -89,8 +55,84 @@ sub to_regex {
    $v;
 }
 
+sub retrive_module_versions
+{
+   my $module = $_[0];
+   my $dump = $module . '.dump';
+   my @modules;
+
+   if (-f $dump) {
+      @modules = @{retrieve($dump)};
+   }
+
+   unless (@modules) {
+      my $ua = Mojo::UserAgent->new();
+      my $r = $ua->get('https://metacpan.org/pod/' . $module);
+      if ($r->success && $r->res->code() == 200) {
+         my $cl = $r->res->dom
+                         ->find('div.release.status-latest.maturity-released select option')
+                         ->map(attr => 'value')
+                         ->compact()
+                         ->map(sub{s!^/module!https://api.metacpan.org/source!r})
+                         ->sort()
+                         ->uniq();
+         @modules = $cl->map(sub {
+               my $r = $ua->get($_);
+               if ($r->success && $r->res->code() == 200) {
+                  $r->res->body
+               } else {
+                  warn "Can't get module $_\n";
+                  undef
+               }
+            }
+         )->compact()->each();
+         store \@modules, $dump;
+      } else {
+         warn "Module not found on metacpan\n";
+      }
+   }
+
+   my %versions;
+   my $ident = 0;
+   foreach(@modules) {
+      #if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*(?:['"])([^'"]++)(?:['"])\h*;.*$/pim) {
+      if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*.*?(\d++(?:[\.\:\-\_]\w++)*).*?;/pim) {
+         my $v   = trim(${^MATCH});
+         my $ver = 'v_' . $1 =~ tr/./_/r;
+         $ident = length($ver)
+            if $ident < length($ver);
+         unless (exists $versions{$ver}) {
+            $versions{$ver} = $v;
+         } else {
+            die "Different signatures of same version $ver: '$v' and '$versions{$ver}'\n"
+               unless $versions{$ver} eq $v;
+         }
+      } else {
+         die "Failed to find version string in module:\n'$_'\n";
+      }
+   }
+   my $str = '';
+   foreach(reverse sort keys %versions) {
+      my $i = ' ' x ($ident - length($_) + 1);
+      my $r = to_regex($versions{$_});
+      $str .= "\t\t$_" . $i . "= '$r'\n";
+   }
+
+   \$str;
+}
+
+sub try_determine_version
+{
+   if ($_[0] =~ /(?:(?:before|up\h+to)\h*)?(?:\d++(?:[\.\:\-\_]\w++)*)(?:\h*and\h+(?:earlier|bell?ow))?/p) {
+      ${^MATCH}
+   } else {
+      ''
+   }
+}
+
 sub fetch_description
 {
+   my $cve = $_[0];
    my %desc;
    my $ua = Mojo::UserAgent->new(max_redirects => 0);
    $ua->transactor->name('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36');
@@ -132,38 +174,13 @@ sub fetch_description
       $desc{risk}  = '';
    }
 
+   $desc{version} = try_determine_version($desc{full});
+
    \%desc;
 }
 
-
-my %versions;
-my $ident = 0;
-foreach(@modules) {
-   #if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*(?:['"])([^'"]++)(?:['"])\h*;.*$/pim) {
-   if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*.*?(\d++(?:[\.\:\-\_]\w++)*).*?;/pim) {
-      my $v   = trim(${^MATCH});
-      my $ver = 'v_' . $1 =~ tr/./_/r;
-      $ident = length($ver)
-         if $ident < length($ver);
-      unless (exists $versions{$ver}) {
-         $versions{$ver} = $v;
-      } else {
-         die "Different signatures of same version $ver: '$v' and '$versions{$ver}'\n"
-            unless $versions{$ver} eq $v;
-      }
-   } else {
-      die "Failed to find version string in module:\n'$_'\n";
-   }
-}
-my $str = '';
-foreach(reverse sort keys %versions) {
-   my $i = ' ' x ($ident - length($_) + 1);
-   my $r = to_regex($versions{$_});
-   $str .= "\t\t$_" . $i . "= '$r'\n";
-}
-
-
-my %desc = %{fetch_description()};
+my $str  = retrive_module_versions($module);
+my $desc = fetch_description($cve);
 
 say "#This rule was generated by: $arg_string\n";
 my $private_rule_tmpl =
@@ -185,12 +202,12 @@ my $yara_rule_tmpl =
 {
 \tmeta:
 \t\tcomponent_name = \"$hmodule module for Perl\"
-\t\tcomponent_version = \"\"
-\t\tcustom_title = \"$desc{short}\"
-\t\tcustom_level = \"$desc{risk}\"
-\t\tcustom_description = \"$desc{full}\"
+\t\tcomponent_version = \"$desc->{version}\"
+\t\tcustom_title = \"$desc->{short}\"
+\t\tcustom_level = \"$desc->{risk}\"
+\t\tcustom_description = \"$desc->{full}\"
 \tstrings:
-$str
+$$str
 \tcondition:
 \t\t$mmodule and any of (\$v*)
 }";
