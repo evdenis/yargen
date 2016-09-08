@@ -15,9 +15,21 @@ use warnings;
 use strict;
 use feature qw/say/;
 
-use Mojo::UserAgent;
-use Storable qw/store retrieve/;
 use Getopt::Long;
+my $MLOADED;
+BEGIN {
+   eval {
+      require Mojo::UserAgent;
+      require Storable;
+      Mojo::UserAgent->import();
+      Storable->import(qw/store retrieve/);
+      $MLOADED = 1;
+   };
+}
+
+unless ($MLOADED) {
+   die "Please, install perl modules Mojolicious and Storable.\nInstallation: cpan Mojolicious Storable\n"
+}
 
 my $arg_string = join(" ", $0, @ARGV);
 my $module;
