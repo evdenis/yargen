@@ -57,7 +57,7 @@ pod2usage({-msg => "Please, provide perl module name.\n", -exitval => 1, -verbos
 	unless $module;
 
 pod2usage({-msg => "'$module' is not a valid perl module name.\n", -exitval => 1, -verbose => 0})
-	unless $module =~ /^\w++((?:::)\w++)?$/;
+	unless $module =~ /^\w++((?:::)\w++)*?$/;
 
 pod2usage({-msg => "Please, provide cve argument.\n", -exitval => 1, -verbose => 0})
 	unless $cve;
