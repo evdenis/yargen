@@ -182,7 +182,7 @@ sub retrive_module_versions
    foreach(reverse sort keys %versions) {
       my $i = ' ' x ($ident - length($_) + 1);
       my $r = to_regex($versions{$_});
-      push @vers, "\t\t$_" . $i . "= '$r'";
+      push @vers, "\t\t\$$_" . $i . "= '$r'";
    }
 
    join("\n", @vers);
