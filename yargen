@@ -45,13 +45,38 @@ unless ($MLOADED) {
 my $arg_string = join(" ", $0, @ARGV);
 my $module;
 my $cve;
+my $license = 0;
 my $help = 0;
 
 GetOptions("m|module=s" => \$module,
            "c|cve=s"    => \$cve,
+           "l|license"  => \$license,
            "help"       => \$help)
 or pod2usage(2);
 pod2usage({-verbose => 2, -exitval => 1}) if $help;
+if ($license) {
+   open my $self, '<', $0;
+   my @l;
+   my $first = 0;
+   while (<$self>) {
+      chomp;
+      unless ($first) {
+         if ($_ =~ /\A\#.*?license/i) {
+            push @l, $_;
+            $first++;
+         }
+      } else {
+         if ($_ =~ /\A\#/) {
+            push @l, $_;
+         } else {
+            last;
+         }
+      }
+   }
+   say join("\n", map {s/\A#\h*+//r} @l);
+   close $self;
+   exit 0;
+}
 
 pod2usage({-msg => "Please, provide perl module name.\n", -exitval => 1, -verbose => 0})
 	unless $module;
