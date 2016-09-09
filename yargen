@@ -156,6 +156,7 @@ sub try_determine_version
    if ($_[0] =~ /(?:(?:before|up\h+to)\h*)?(?:\d++(?:[\.\:\-\_]\w++)*)(?:\h*and\h+(?:earlier|bell?ow))?/p) {
       ${^MATCH}
    } else {
+      warn "Can't determine version\n";
       ''
    }
 }
@@ -163,28 +164,49 @@ sub try_determine_version
 sub fetch_description
 {
    my $cve = $_[0];
+   my $saved_mitre = $_[0] . ".mitre";
+   my $saved_vuldb = $_[0] . ".vuldb";
    my %desc;
+
    my $ua = Mojo::UserAgent->new(max_redirects => 0);
    $ua->transactor->name('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36');
-   
-   my $r = $ua->get('http://cve.mitre.org/cgi-bin/cvename.cgi?name=' . $cve);
-   if ($r->success && $r->res->code() == 200) {
-      my $c = $r->res->dom
-              ->find('#GeneratedTable tr:nth-child(4) > td')
-              ->map('text')
-              ->join("\n");
+
+   my $dom = undef;
+   unless (-r $saved_mitre) {
+      my $r = $ua->get('http://cve.mitre.org/cgi-bin/cvename.cgi?name=' . $cve);
+      if ($r->success && $r->res->code() == 200) {
+         $dom = $r->res->dom;
+         store $dom, $saved_mitre;
+      }
+   } else {
+      $dom = retrieve($saved_mitre);
+   }
+
+   if ($dom) {
+      my $c = $dom->find('#GeneratedTable tr:nth-child(4) > td')
+                  ->map('text')
+                  ->join("\n");
       $desc{full} = "<p>" . trim($c) . "</p>";
    } else {
       warn "Failed to fetch full description.\n";
+      unlink $saved_mitre if -f $saved_mitre;
       $desc{full} = '';
    }
-   
-   $r = $ua->post('http://vuldb.com/?search' => form => {cve => $cve});
-   if ($r->success && $r->res->code() == 200) {
-      my $c = $r->res->dom
-                ->find('.vullist')
-                ->join("\n");
-   
+
+   unless (-r $saved_vuldb) {
+      my $r = $ua->post('http://vuldb.com/?search' => form => {cve => $cve});
+      if ($r->success && $r->res->code() == 200) {
+         $dom = $r->res->dom;
+         store $dom, $saved_vuldb;
+      }
+   } else {
+      $dom = retrieve($saved_vuldb);
+   }
+
+   if ($dom) {
+      my $c = $dom->find('.vullist')
+                  ->join("\n");
+
       my @risk  = ($c =~ /risksymbol\h++(\w++)/g);
       if ($#risk == 0) {
          $desc{risk} = $risk[0];
@@ -192,14 +214,17 @@ sub fetch_description
             $desc{short} = $1;
          } else {
             warn "Failed to fetch short description.\n";
+            unlink $saved_vuldb if -f $saved_vuldb;
             $desc{short} = '';
          }
       } else {
          warn "Failed to fetch risk indicator.\n";
+         unlink $saved_vuldb if -f $saved_vuldb;
          $desc{risk} = '';
       }
    } else {
       warn "Failed to fetch risk indication and short description.\n";
+      unlink $saved_vuldb if -f $saved_vuldb;
       $desc{short} = '';
       $desc{risk}  = '';
    }
