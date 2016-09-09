@@ -308,7 +308,7 @@ say $yara_rule_tmpl;
 __END__
 =head1 NAME
 
-yargen - Generate a rule in yara format with a description of vulnerability in a perl module.
+yargen - generate a rule in yara format with a description of vulnerability in a perl module.
 The rule is for Positive Technologies(c) Approof tool B<http://approof.ptsecurity.ru/>.
 
 =head1 SYNOPSIS
@@ -319,6 +319,7 @@ yargen --module <Perl::Module> --cve <CVE-####-####>
    --module          perl module
    --cve             cve id
    --help            help message
+   --license         print license
 
 =head1 OPTIONS
 
@@ -332,9 +333,13 @@ Perl module name. Example: HTML::Scrubber. https://metacpan.org/pod/HTML::Scrubb
 
 CVE id. Example: CVE-2015-5667. http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2015-5667
 
+=item B<--license>
+
+Print license.
+
 =item B<--help>
 
-Print help message.
+Print this message.
 
 =back
 
