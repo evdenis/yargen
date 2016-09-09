@@ -68,6 +68,8 @@ if ($cve =~ /^CVE/i) {
    }
 }
 
+my $determine_module = "package\\s+$module;";
+my $module_det_re = qr/$determine_module/;
 my $mmodule = 'Perl' . $module =~ s/:++//gr  . 'Module';
 my $hmodule = $module =~ s/::/-/gr;
 my $ccve = uc($cve =~ tr/-/_/r);
@@ -125,6 +127,10 @@ sub retrive_module_versions
    my %versions;
    my $ident = 0;
    foreach(@modules) {
+      # check
+      die "Failed to recognise module with standart re:\n$_\n"
+         unless $_ =~ /$module_det_re/;
+
       #if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*(?:['"])([^'"]++)(?:['"])\h*;.*$/pim) {
       if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*.*?(\d++(?:[\.\:\-\_]\w++)*).*?;/pim) {
          my $v   = trim(${^MATCH});
@@ -138,7 +144,7 @@ sub retrive_module_versions
                unless $versions{$ver} eq $v;
          }
       } else {
-         die "Failed to find version string in module:\n'$_'\n";
+         die "Failed to find version string in module:\n$_\n";
       }
    }
    my @vers;
@@ -244,7 +250,7 @@ my $private_rule_tmpl =
 \tmeta:
 \t\tcustom_description = \"Private rule for identifying Perl $module Module\"
 \tstrings:
-\t\t\$package = /package\\s+$module;/
+\t\t\$package = /$determine_module/
 \tcondition:
 \t\t\$package
 }";
