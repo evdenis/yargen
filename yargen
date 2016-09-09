@@ -153,7 +153,7 @@ sub retrive_module_versions
 
 sub try_determine_version
 {
-   if ($_[0] =~ /(?:(?:before|up\h+to)\h*)?(?:\d++(?:[\.\:\-\_]\w++)*)(?:\h*and\h+(?:earlier|bell?ow))?/p) {
+   if ($_[0] =~ /(?:(?:before|up\h+to)\h*)?(?:\d++(?:[\.\:\-\_]\w++)*)(?:(?:\h*and\h+(?:earlier|below))|(?:\h*through\h*(?:\d++(?:[\.\:\-\_]\w++)*)))?/p) {
       ${^MATCH}
    } else {
       warn "Can't determine version\n";
