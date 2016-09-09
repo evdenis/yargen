@@ -28,13 +28,17 @@ Digest CVE-2011-3597
 HTML::Template::Pro CVE-2011-4616
 CGI CVE-2012-5526/;
 
+my @include;
 while (my ($m, $c) = splice(@rules, 0, 2)) {
    my $save = $c =~ tr/-/_/r;
+   push @include, "include \"./my_yara_rules/$save.yar\"";
    $save = '../FP-community-rules/my_yara_rules/' . $save . ".yar";
    my $exec = "./yargen -m $m -c $c > $save";
    print $exec . "\n";
    `$exec`;
 }
+
+print join("\n", @include) . "\n";
 
 ##./yargen -m Locale::Maketext  CVE-2012-6329
 ##./yargen -m Spoon::Cookie  CVE-2012-6143
