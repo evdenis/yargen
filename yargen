@@ -38,10 +38,6 @@ BEGIN {
    };
 }
 
-unless ($MLOADED) {
-   die "Please, install perl modules Mojolicious and Storable.\nInstallation: cpan Mojolicious Storable\n"
-}
-
 my $arg_string = join(" ", $0, @ARGV);
 my $module;
 my $cve;
@@ -76,6 +72,13 @@ if ($license) {
    say join("\n", map {s/\A#\h*+//r} @l);
    close $self;
    exit 0;
+}
+
+unless ($MLOADED) {
+   die "Please, install perl module Mojolicious.
+Installation:
+\tcpan Mojolicious ||
+\tdnf install perl-Mojolicious.noarch\n"
 }
 
 pod2usage({-msg => "Please, provide perl module name.\n", -exitval => 1, -verbose => 0})
