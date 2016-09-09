@@ -96,7 +96,7 @@ if ($cve =~ /^CVE/i) {
    }
 }
 
-my $determine_module = "package\\s+$module;";
+my $determine_module = "package\\s+$module\\s*;";
 my $module_det_re = qr/$determine_module/;
 my $mmodule = 'Perl' . $module =~ s/:++//gr  . 'Module';
 my $hmodule = $module =~ s/::/-/gr;
