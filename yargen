@@ -31,8 +31,10 @@ my $MLOADED;
 BEGIN {
    eval {
       require Mojo::UserAgent;
+      require Mojo::JSON;
       require Storable;
       Mojo::UserAgent->import();
+      Mojo::JSON->import(qw/decode_json/);
       Storable->import(qw/store retrieve/);
       $MLOADED = 1;
    };
@@ -43,9 +45,11 @@ my $module;
 my $cve;
 my $license = 0;
 my $help = 0;
+my $lang = 'perl'; # python TODO: ruby php javascript
 
 GetOptions("m|module=s" => \$module,
            "c|cve=s"    => \$cve,
+           "l|lang=s"   => \$lang,
            "l|license"  => \$license,
            "help"       => \$help)
 or pod2usage(2);
@@ -81,13 +85,18 @@ Installation:
 \tdnf install perl-Mojolicious.noarch\n"
 }
 
-pod2usage({-msg => "Please, provide perl module name.\n", -exitval => 1, -verbose => 0})
+pod2usage({-msg => "Please, use argument --lang to specify language (perl | python).\n", -exitval => 1, -verbose => 0})
+   unless $lang == 'perl' || $lang == 'python';
+
+pod2usage({-msg => "Please, use argument --module to specify module name.\n", -exitval => 1, -verbose => 0})
 	unless $module;
 
-pod2usage({-msg => "'$module' is not a valid perl module name.\n", -exitval => 1, -verbose => 0})
-	unless $module =~ /^\w++((?:::)\w++)*?$/;
+if ($lang == 'perl') {
+   pod2usage({-msg => "'$module' is not a valid perl module name.\n", -exitval => 1, -verbose => 0})
+	   unless $module =~ /^\w++((?:::)\w++)*?$/;
+}
 
-pod2usage({-msg => "Please, provide cve argument.\n", -exitval => 1, -verbose => 0})
+pod2usage({-msg => "Please, use --cve to specify cve number.\n", -exitval => 1, -verbose => 0})
 	unless $cve;
 
 if ($cve =~ /^CVE/i) {
@@ -118,7 +127,7 @@ sub to_regex {
    $v;
 }
 
-sub retrive_module_versions
+sub retrive_perl_module_versions
 {
    my $module = $_[0];
    my $dump = $module . '.dump';
@@ -149,7 +158,7 @@ sub retrive_module_versions
                }
             }
          )->compact()->each();
-         store \@modules, $dump;
+         store(\@modules, $dump);
       } else {
          warn "Module not found on metacpan\n";
       }
@@ -188,6 +197,77 @@ sub retrive_module_versions
    join("\n", @vers);
 }
 
+sub retrive_python_module_versions
+{
+   my $module = $_[0];
+   my $dump = $module . '.dump';
+   my @modules;
+
+   if (-f $dump) {
+      @modules = @{retrieve($dump)};
+   }
+
+   unless (@modules) {
+      my $ua = Mojo::UserAgent->new();
+      my $r = $ua->get('https://pypi.python.org/pypi/' . $module . '/json');
+      if ($r->success && $r->res->code() == 200) {
+         my $cl = $r->res->dom
+                         ->find('div.release.status-latest.maturity-released select option')
+                         ->map(attr => 'value')
+                         ->compact()
+                         ->map(sub{s!^/module!https://api.metacpan.org/source!r})
+                         ->sort()
+                         ->uniq();
+         @modules = $cl->map(sub {
+               my $r = $ua->get($_);
+               if ($r->success && $r->res->code() == 200) {
+                  $r->res->body
+               } else {
+                  warn "Can't get module $_\n";
+                  undef
+               }
+            }
+         )->compact()->each();
+         store(\@modules, $dump);
+      } else {
+         warn "Module not found on pypi.python.org\n";
+      }
+   }
+
+   my %versions;
+   my $ident = 0;
+   foreach(@modules) {
+      # check
+      die "Failed to recognise module with standart re:\n$_\n"
+         unless $_ =~ /$module_det_re/;
+
+      #if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*(?:['"])([^'"]++)(?:['"])\h*;.*$/pim) {
+      if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*.*?(\d++(?:[\.\:\-\_]\w++)*).*?;/pim) {
+         my $v   = trim(${^MATCH});
+         my $ver = 'v_' . $1 =~ tr/./_/r;
+         $ident = length($ver)
+            if $ident < length($ver);
+         unless (exists $versions{$ver}) {
+            $versions{$ver} = $v;
+         } else {
+            die "Different signatures of same version $ver: '$v' and '$versions{$ver}'\n"
+               unless $versions{$ver} eq $v;
+         }
+      } else {
+         die "Failed to find version string in module:\n$_\n";
+      }
+   }
+   my @vers;
+   foreach(reverse sort keys %versions) {
+      my $i = ' ' x ($ident - length($_) + 1);
+      my $r = to_regex($versions{$_});
+      push @vers, "\t\t\$$_" . $i . "= /$r/";
+   }
+
+   join("\n", @vers);
+}
+
+
 sub try_determine_version
 {
    if ($_[0] =~ /(?:(?:before|up\h+to)\h*)?(?:\d++(?:[\.\:\-\_]\w++)*)(?:(?:\h*and\h+(?:earlier|below))|(?:\h*through\h*(?:\d++(?:[\.\:\-\_]\w++)*)))?/p) {
@@ -213,7 +293,7 @@ sub fetch_description
       my $r = $ua->get('http://cve.mitre.org/cgi-bin/cvename.cgi?name=' . $cve);
       if ($r->success && $r->res->code() == 200) {
          $dom = $r->res->dom;
-         store $dom, $saved_mitre;
+         store($dom, $saved_mitre);
       }
    } else {
       $dom = retrieve($saved_mitre);
@@ -234,7 +314,7 @@ sub fetch_description
       my $r = $ua->post('http://vuldb.com/?search' => form => {cve => $cve});
       if ($r->success && $r->res->code() == 200) {
          $dom = $r->res->dom;
-         store $dom, $saved_vuldb;
+         store($dom, $saved_vuldb);
       }
    } else {
       $dom = retrieve($saved_vuldb);
@@ -271,7 +351,14 @@ sub fetch_description
    \%desc;
 }
 
-my $str  = retrive_module_versions($module);
+my $str;
+if ($lang == 'perl') {
+   $str  = retrive_perl_module_versions($module);
+} elsif ($lang == 'python') {
+   $str  = retrive_python_module_versions($module);
+} else {
+   ...
+}
 my $desc = fetch_description($cve);
 
 my $private_rule_tmpl =
