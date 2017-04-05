@@ -27,6 +27,7 @@ use feature qw/say/;
 
 use Getopt::Long qw/GetOptions/;
 use Pod::Usage qw/pod2usage/;
+use Archive::Extract;
 my $MLOADED;
 BEGIN {
    eval {
@@ -50,7 +51,7 @@ my $lang = 'perl'; # python TODO: ruby php javascript
 GetOptions("m|module=s" => \$module,
            "c|cve=s"    => \$cve,
            "l|lang=s"   => \$lang,
-           "l|license"  => \$license,
+           "license"    => \$license,
            "help"       => \$help)
 or pod2usage(2);
 pod2usage({-verbose => 2, -exitval => 1}) if $help;
@@ -86,12 +87,12 @@ Installation:
 }
 
 pod2usage({-msg => "Please, use argument --lang to specify language (perl | python).\n", -exitval => 1, -verbose => 0})
-   unless $lang == 'perl' || $lang == 'python';
+   unless $lang eq 'perl' || $lang eq 'python';
 
 pod2usage({-msg => "Please, use argument --module to specify module name.\n", -exitval => 1, -verbose => 0})
 	unless $module;
 
-if ($lang == 'perl') {
+if ($lang eq 'perl') {
    pod2usage({-msg => "'$module' is not a valid perl module name.\n", -exitval => 1, -verbose => 0})
 	   unless $module =~ /^\w++((?:::)\w++)*?$/;
 }
@@ -200,7 +201,7 @@ sub retrive_perl_module_versions
 sub retrive_python_module_versions
 {
    my $module = $_[0];
-   my $dump = $module . '.dump';
+   my $dump = 'python-' . $module . '.dump';
    my @modules;
 
    if (-f $dump) {
@@ -211,14 +212,26 @@ sub retrive_python_module_versions
       my $ua = Mojo::UserAgent->new();
       my $r = $ua->get('https://pypi.python.org/pypi/' . $module . '/json');
       if ($r->success && $r->res->code() == 200) {
-         my $cl = $r->res->dom
-                         ->find('div.release.status-latest.maturity-released select option')
-                         ->map(attr => 'value')
-                         ->compact()
-                         ->map(sub{s!^/module!https://api.metacpan.org/source!r})
-                         ->sort()
-                         ->uniq();
-         @modules = $cl->map(sub {
+         my $cl = decode_json($r->res->body);
+         my $rel_list = $cl->{releases};
+         my @releases = keys %$rel_list;
+         my %links = map {
+            my $link = undef;
+            foreach my $id (@{$rel_list->{$_}}) {
+               if ($id->{python_version} eq 'source' &&
+                   $id->{packagetype} eq 'sdist') {
+                  $link = $id->{url};
+                  last;
+               }
+            }
+            unless ($link) {
+               warn "Can't find sources for version $_\n";
+               ()
+            } else {
+               $_ => $link
+            }
+         } @releases;
+         @modules = map {
                my $r = $ua->get($_);
                if ($r->success && $r->res->code() == 200) {
                   $r->res->body
@@ -226,14 +239,13 @@ sub retrive_python_module_versions
                   warn "Can't get module $_\n";
                   undef
                }
-            }
-         )->compact()->each();
+            } values %links;
          store(\@modules, $dump);
       } else {
          warn "Module not found on pypi.python.org\n";
       }
    }
-
+=comment
    my %versions;
    my $ident = 0;
    foreach(@modules) {
@@ -265,6 +277,7 @@ sub retrive_python_module_versions
    }
 
    join("\n", @vers);
+=cut
 }
 
 
@@ -352,10 +365,11 @@ sub fetch_description
 }
 
 my $str;
-if ($lang == 'perl') {
+if ($lang eq 'perl') {
    $str  = retrive_perl_module_versions($module);
-} elsif ($lang == 'python') {
+} elsif ($lang eq 'python') {
    $str  = retrive_python_module_versions($module);
+   exit;
 } else {
    ...
 }
