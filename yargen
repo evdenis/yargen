@@ -27,7 +27,12 @@ use feature qw/say/;
 
 use Getopt::Long qw/GetOptions/;
 use Pod::Usage qw/pod2usage/;
-use Archive::Extract;
+use File::Temp qw/tempdir/;
+use File::Slurp qw/read_file/;
+use File::Spec::Functions qw/catfile/;
+use Archive::Tar;
+use IO::String;
+use IO::Uncompress::AnyUncompress qw/$AnyUncompressError/;
 my $MLOADED;
 BEGIN {
    eval {
@@ -43,6 +48,7 @@ BEGIN {
 
 my $arg_string = join(" ", $0, @ARGV);
 my $module;
+my $keep_temp_files = 0;
 my $cve;
 my $license = 0;
 my $help = 0;
@@ -51,6 +57,7 @@ my $lang = 'perl'; # python TODO: ruby php javascript
 GetOptions("m|module=s" => \$module,
            "c|cve=s"    => \$cve,
            "l|lang=s"   => \$lang,
+           "k|keep!"    => \$keep_temp_files,
            "license"    => \$license,
            "help"       => \$help)
 or pod2usage(2);
@@ -245,37 +252,100 @@ sub retrive_python_module_versions
          warn "Module not found on pypi.python.org\n";
       }
    }
-=comment
+
+   my $dir = tempdir($keep_temp_files ? () : (CLEANUP => 1));
+   print "Temp dir for unpacking python modules: $dir\n"
+      if $keep_temp_files;
+   chdir($dir);
+
    my %versions;
    my $ident = 0;
    foreach(@modules) {
-      # check
-      die "Failed to recognise module with standart re:\n$_\n"
-         unless $_ =~ /$module_det_re/;
-
-      #if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*(?:['"])([^'"]++)(?:['"])\h*;.*$/pim) {
-      if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*.*?(\d++(?:[\.\:\-\_]\w++)*).*?;/pim) {
-         my $v   = trim(${^MATCH});
-         my $ver = 'v_' . $1 =~ tr/./_/r;
-         $ident = length($ver)
-            if $ident < length($ver);
-         unless (exists $versions{$ver}) {
-            $versions{$ver} = $v;
-         } else {
-            die "Different signatures of same version $ver: '$v' and '$versions{$ver}'\n"
-               unless $versions{$ver} eq $v;
+      #uncompress
+      my $z = IO::Uncompress::AnyUncompress->new(IO::String->new($_))
+          or die "uncompress failed: $AnyUncompressError\n";
+      my @files = Archive::Tar->extract_archive($z);
+      my $path_to_init = catfile($module, '__init__.py');
+      my $path_to_folder;
+      foreach (@files) {
+         if (rindex($_, $path_to_init) != -1) {
+            print "$_\n";
+            $path_to_init = $_;
+            last;
          }
-      } else {
-         die "Failed to find version string in module:\n$_\n";
       }
+      unless (-r $path_to_init) {
+         warn "Can't read file $path_to_init\n";
+         next;
+      }
+      $path_to_folder = substr($path_to_init, 0, rindex($path_to_init, '/') + 1);
+      print "reading files $path_to_init\n";
+      my $ifile = read_file($path_to_init);
+      my %sig;
+      foreach (qw/version title build author/) {
+         if ($ifile =~ /_?_?${_}_?_?\h*=.*$/pim) {
+            $sig{'__init__.py'}{$_} = trim(${^MATCH});
+         } else {
+            warn "Failed to find $_ string in module __init__.py\n"
+         }
+      }
+
+      if (!defined $sig{'__init__.py'}{version} ||
+          !defined $sig{'__init__.py'}{title}) {
+         my @files = split(/\n/, `find $path_to_folder -maxdepth 1 -type f -name '*.py'`);
+         @files = grep { !m/__init__\.py/ } @files;
+         if (@files) {
+            my $fl = length($path_to_folder);
+            foreach (split(/\n/, `grep -ioHPe '_?_?(version\|title\|author\|build)_?_?\\h*=.*\$' @files`)) {
+               my $f = substr($_, $fl);
+               my $sep = index($f, ':');
+               $f = substr($f, 0, $sep);
+               my $id = substr($_, $fl + $sep + 1);
+               foreach (qw/version title author build/) {
+                  if ($id =~ /$_/) {
+                     $sig{$f}{$_} = $id;
+                  }
+               }
+            }
+         }
+      }
+
+      my %best;
+      $best{title}   = $sig{'__init__.py'}{title};
+      $best{version} = $sig{'__init__.py'}{version};
+      $best{build}   = $sig{'__init__.py'}{build};
+      $best{author}  = $sig{'__init__.py'}{author};
+      delete $sig{'__init__.py'};
+
+      use Data::Printer;
+
+      p %sig if keys %sig;
+
+      foreach (keys %sig) {
+         if (defined $sig{$_}{version} && defined $sig{$_}{title}) {
+            $best{title}   = $sig{$_}{title};
+            $best{version} = $sig{$_}{version};
+            $best{build}   = $sig{$_}{build};
+            $best{author}  = $sig{$_}{author};
+            last;
+         }
+      }
+
+      p %best;
+
+      die "Failed to recognise module\n"
+          unless defined $best{version} && defined $best{title};
+
+      # grepping other files
+      # trying to determine
    }
+=comment
    my @vers;
    foreach(reverse sort keys %versions) {
       my $i = ' ' x ($ident - length($_) + 1);
       my $r = to_regex($versions{$_});
       push @vers, "\t\t\$$_" . $i . "= /$r/";
    }
-
    join("\n", @vers);
 =cut
 }
