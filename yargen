@@ -28,10 +28,8 @@ use feature qw/say/;
 use Getopt::Long qw/GetOptions/;
 use Pod::Usage qw/pod2usage/;
 use File::Temp qw/tempdir/;
-use File::Slurp qw/read_file/;
 use File::Spec::Functions qw/catfile/;
 use Archive::Tar;
-use IO::String;
 use IO::Uncompress::AnyUncompress qw/$AnyUncompressError/;
 my $MLOADED;
 BEGIN {
@@ -39,9 +37,13 @@ BEGIN {
       require Mojo::UserAgent;
       require Mojo::JSON;
       require Storable;
+      require File::Slurp;
+      require IO::String;
       Mojo::UserAgent->import();
       Mojo::JSON->import(qw/decode_json/);
       Storable->import(qw/store retrieve/);
+      File::Slurp->import(qw/read_file/);
+      IO::String->import();
       $MLOADED = 1;
    };
 }
@@ -89,7 +91,7 @@ if ($license) {
 unless ($MLOADED) {
    die "Please, install perl module Mojolicious.
 Installation:
-\tcpan Mojolicious ||
+\tcpan Mojolicious File::Slurp IO::String ||
 \tdnf install perl-Mojolicious.noarch\n"
 }
 
