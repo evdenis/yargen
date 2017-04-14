@@ -95,8 +95,8 @@ Installation:
 \tdnf install perl-Mojolicious.noarch\n"
 }
 
-pod2usage({-msg => "Please, use argument --lang to specify language (perl | python).\n", -exitval => 1, -verbose => 0})
-   unless $lang eq 'perl' || $lang eq 'python';
+pod2usage({-msg => "Please, use argument --lang to specify language (perl | python | js).\n", -exitval => 1, -verbose => 0})
+   unless $lang eq 'perl' || $lang eq 'python' || $lang eq 'js';
 
 pod2usage({-msg => "Please, use argument --module to specify module name.\n", -exitval => 1, -verbose => 0})
 	unless $module;
@@ -115,8 +115,8 @@ if ($cve =~ /^CVE/i) {
    }
 }
 
-my $determine_module = "package\\s+$module\\s*;";
-my $module_det_re = qr/$determine_module/;
+my $determine_perl_module = "package\\s+$module\\s*;";
+my $perl_module_det_re = qr/$determine_perl_module/;
 my $mmodule = 'Perl' . $module =~ s/:++//gr  . 'Module';
 my $hmodule = $module =~ s/::/-/gr;
 my $ccve = uc($cve =~ tr/-/_/r);
@@ -179,7 +179,7 @@ sub retrive_perl_module_versions
    foreach(@modules) {
       # check
       die "Failed to recognise module with standart re:\n$_\n"
-         unless $_ =~ /$module_det_re/;
+         unless $_ =~ /$perl_module_det_re/;
 
       #if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*(?:['"])([^'"]++)(?:['"])\h*;.*$/pim) {
       if (/^.*?v(?:e(?:r(?:s(?:i(?:o(?:n)?)?)?)?)?)?\h*=\h*.*?(\d++(?:[\.\:\-\_]\w++)*).*?;/pim) {
@@ -352,6 +352,89 @@ sub retrive_python_module_versions
 =cut
 }
 
+sub retrive_js_module_versions
+{
+   my $module = $_[0];
+   my $dump = 'js-' . $module . '.dump';
+   my @modules;
+
+   if (-f $dump) {
+      @modules = @{retrieve($dump)};
+   }
+
+   unless (@modules) {
+      my $ua = Mojo::UserAgent->new();
+      my $r = $ua->get('https://registry.npmjs.org/' . $module);
+      if ($r->success && $r->res->code() == 200) {
+         my $cl = decode_json($r->res->body);
+         my $vers = $cl->{versions};
+         my %links = map {
+            my $link = $vers->{$_}{dist}{tarball};
+            unless ($link) {
+               warn "Can't find sources for version $_\n";
+               ()
+            } else {
+               $_ => $link
+            }
+         } keys %$vers;
+         @modules = map {
+            my $r = $ua->get($_);
+            if ($r->success && $r->res->code() == 200) {
+               $r->res->body
+            } else {
+               warn "Can't get module $_\n";
+               undef
+            }
+         } values %links;
+         store(\@modules, $dump);
+      } else {
+         warn "Module not found on registry.npmjs.org\n";
+      }
+   }
+
+   my $dir = tempdir($keep_temp_files ? () : (CLEANUP => 1));
+   print "Temp dir for unpacking js modules: $dir\n"
+       if $keep_temp_files;
+   chdir($dir);
+
+   my %versions;
+   my $ident = 0;
+   foreach(@modules) {
+      #uncompress
+      my $z = IO::Uncompress::AnyUncompress->new(IO::String->new($_))
+          or die "uncompress failed: $AnyUncompressError\n";
+      Archive::Tar->extract_archive($z);
+      my $pj = read_file(catfile($dir, 'package', 'package.json'));
+      my $json = decode_json($pj);
+
+      my $v   = $json->{version};
+      my $tmp = $v =~ tr/./_/r;
+      my $ver = 'v_' . $tmp;
+
+      $ident = length($ver)
+          if $ident < length($ver);
+      unless (exists $versions{$ver}) {
+         $versions{$ver} = { v => $v, a => $json->{author}, r => $json->{repository}{url} };
+      } else {
+         die "Different signatures of same version $ver: '$v' and '$versions{$ver}{v}'\n"
+             unless $versions{$ver}{v} eq $v;
+      }
+   }
+
+   my @vers;
+   foreach(reverse sort keys %versions) {
+      my $i = ' ' x ($ident - length($_) + 1);
+      my $r = to_regex($versions{$_}{v});
+      push @vers, "\t\t\$$_" . $i . "= /$r/";
+      push @vers, "\t\t\$$_" . $i . "= $versions{$_}{a}";
+      push @vers, "\t\t\$$_" . $i . "= $versions{$_}{r}";
+   }
+
+   join("\n", @vers);
+   #use Data::Printer;
+   #p @vers;
+   #exit;
+}
 
 sub try_determine_version
 {
@@ -438,10 +521,13 @@ sub fetch_description
 
 my $str;
 if ($lang eq 'perl') {
-   $str  = retrive_perl_module_versions($module);
+   $str = retrive_perl_module_versions($module);
 } elsif ($lang eq 'python') {
-   $str  = retrive_python_module_versions($module);
+   $str = retrive_python_module_versions($module);
    exit;
+} elsif ($lang eq 'js') {
+   $str = retrive_js_module_versions($module);
+   #exit;
 } else {
    ...
 }
@@ -454,7 +540,7 @@ my $private_rule_tmpl =
 \tmeta:
 \t\tcustom_description = \"Private rule for identifying Perl $module Module\"
 \tstrings:
-\t\t\$package = /$determine_module/
+\t\t\$package = /$determine_perl_module/
 \tcondition:
 \t\t\$package
 }";
